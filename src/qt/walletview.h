@@ -22,6 +22,7 @@ class AddressBookPage;
 class CreateContract;
 class SendToContract;
 class CallContract;
+class QRCToken;
 
 QT_BEGIN_NAMESPACE
 class QModelIndex;
@@ -70,6 +71,7 @@ private:
     CreateContract* createContractPage;
     SendToContract* sendToContractPage;
     CallContract* callContractPage;
+    QRCToken* QRCTokenPage;
 
     TransactionView *transactionView;
 
@@ -91,6 +93,12 @@ public Q_SLOTS:
     void gotoSendToContractPage();
     /** Switch to call contract page */
     void gotoCallContractPage();
+    /** Switch to Send Token page */
+    void gotoSendTokenPage();
+    /** Switch to Receive Token page */
+    void gotoReceiveTokenPage();
+    /** Switch to Add Token page */
+    void gotoAddTokenPage();
 
     /** Show Sign/Verify Message dialog and switch to sign message tab */
     void gotoSignMessageTab(QString addr = "");
@@ -102,10 +110,19 @@ public Q_SLOTS:
         The new items are those between start and end inclusive, under the given parent item.
     */
     void processNewTransaction(const QModelIndex& parent, int start, int /*end*/);
+
+    /** Show incoming token transaction notification for new token transactions.
+
+        The new items are those between start and end inclusive, under the given parent item.
+    */
+    void processNewTokenTransaction(const QModelIndex& parent, int start, int /*end*/);
+
     /** Encrypt the wallet */
     void encryptWallet(bool status);
     /** Backup the wallet */
     void backupWallet();
+    /** Restore the wallet */
+    void restoreWallet();
     /** Change encrypted wallet passphrase */
     void changePassphrase();
     /** Ask for passphrase to unlock wallet temporarily */
@@ -138,6 +155,8 @@ Q_SIGNALS:
     void hdEnabledStatusChanged(int hdEnabled);
     /** Notify that a new transaction appeared */
     void incomingTransaction(const QString& date, int unit, const CAmount& amount, const QString& type, const QString& address, const QString& label);
+    /** Notify that a new token transaction appeared */
+    void incomingTokenTransaction(const QString& date, const QString& amount, const QString& type, const QString& address, const QString& label, const QString& title);
     /** Notify that the out of sync warning icon has been pressed */
     void outOfSyncWarningClicked();
 };

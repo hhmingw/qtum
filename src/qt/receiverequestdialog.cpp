@@ -10,6 +10,7 @@
 #include "guiutil.h"
 #include "optionsmodel.h"
 #include "walletmodel.h"
+#include "styleSheet.h"
 
 #include <QClipboard>
 #include <QDrag>
@@ -68,7 +69,7 @@ void QRImageWidget::saveImage()
 {
     if(!pixmap())
         return;
-    QString fn = GUIUtil::getSaveFileName(this, tr("Save QR Code"), QString(), tr("PNG Image (*.png)"), NULL);
+    QString fn = GUIUtil::getSaveFileName(this, tr("Save QR Code"), QString(), tr("PNG Image (*.png)"), nullptr);
     if (!fn.isEmpty())
     {
         exportImage().save(fn);
@@ -95,6 +96,10 @@ ReceiveRequestDialog::ReceiveRequestDialog(QWidget *parent) :
     model(0)
 {
     ui->setupUi(this);
+
+    SetObjectStyleSheet(ui->btnCopyURI, StyleSheetNames::ButtonWhite);
+    SetObjectStyleSheet(ui->btnSaveAs, StyleSheetNames::ButtonWhite);
+    SetObjectStyleSheet(ui->btnCopyAddress, StyleSheetNames::ButtonWhite);
 
 #ifndef USE_QRCODE
     ui->btnSaveAs->setVisible(false);
@@ -126,7 +131,7 @@ void ReceiveRequestDialog::setInfo(const SendCoinsRecipient &_info)
     update();
 }
 
-bool ReceiveRequestDialog::createQRCode(QLabel *label, SendCoinsRecipient _info)
+bool ReceiveRequestDialog::createQRCode(QLabel *label, SendCoinsRecipient _info, bool showAddress)
 {
 #ifdef USE_QRCODE
     QString uri = GUIUtil::formatBitcoinURI(_info);
@@ -144,30 +149,34 @@ bool ReceiveRequestDialog::createQRCode(QLabel *label, SendCoinsRecipient _info)
                 label->setText(tr("Error encoding URI into QR Code."));
                 return false;
             }
-            QImage qrImage = QImage(code->width + 8, code->width + 8, QImage::Format_RGB32);
-            qrImage.fill(0xffffff);
+            QImage qrImage = QImage(code->width + 8, code->width + 8, QImage::Format_ARGB32);
+            qrImage.fill(qRgba(0, 0, 0, 0));
             unsigned char *p = code->data;
             for (int y = 0; y < code->width; y++)
             {
                 for (int x = 0; x < code->width; x++)
                 {
-                    qrImage.setPixel(x + 4, y + 4, ((*p & 1) ? 0x0 : 0xffffff));
+                    qrImage.setPixel(x + 4, y + 4, ((*p & 1) ? qRgba(0, 0, 0, 255) : qRgba(255, 255, 255, 255)));
                     p++;
                 }
             }
             QRcode_free(code);
 
-            QImage qrAddrImage = QImage(QR_IMAGE_SIZE, QR_IMAGE_SIZE+20, QImage::Format_RGB32);
-            qrAddrImage.fill(0xffffff);
+            QImage qrAddrImage = QImage(QR_IMAGE_SIZE, QR_IMAGE_SIZE+20, QImage::Format_ARGB32);
+            qrAddrImage.fill(qRgba(0, 0, 0, 0));
             QPainter painter(&qrAddrImage);
             painter.drawImage(0, 0, qrImage.scaled(QR_IMAGE_SIZE, QR_IMAGE_SIZE));
-            QFont font = GUIUtil::fixedPitchFont();
-            font.setPixelSize(12);
-            painter.setFont(font);
-            QRect paddedRect = qrAddrImage.rect();
-            paddedRect.setHeight(QR_IMAGE_SIZE+12);
-            painter.drawText(paddedRect, Qt::AlignBottom|Qt::AlignCenter, _info.address);
-            painter.end();
+
+            if(showAddress)
+            {
+                QFont font = GUIUtil::fixedPitchFont();
+                font.setPixelSize(12);
+                painter.setFont(font);
+                QRect paddedRect = qrAddrImage.rect();
+                paddedRect.setHeight(QR_IMAGE_SIZE+12);
+                painter.drawText(paddedRect, Qt::AlignBottom|Qt::AlignCenter, _info.address);
+                painter.end();
+            }
 
             label->setPixmap(QPixmap::fromImage(qrAddrImage));
             return true;
@@ -193,20 +202,24 @@ void ReceiveRequestDialog::update()
     ui->btnSaveAs->setEnabled(false);
     QString html;
     html += "<html><font face='verdana, arial, helvetica, sans-serif'>";
-    html += "<b>"+tr("Payment information")+"</b><br>";
-    html += "<b>"+tr("URI")+"</b>: ";
+    html += "<font color='#ffffff'>" + tr("PAYMENT INFORMATION")+"</font><br><br>";
+    html += tr("URI")+": ";
     html += "<a href=\""+uri+"\">" + GUIUtil::HtmlEscape(uri) + "</a><br>";
-    html += "<b>"+tr("Address")+"</b>: " + GUIUtil::HtmlEscape(info.address) + "<br>";
+    html += tr("Address")+": <font color='#ffffff'>" + GUIUtil::HtmlEscape(info.address) + "</font><br>";
     if(info.amount)
-        html += "<b>"+tr("Amount")+"</b>: " + BitcoinUnits::formatHtmlWithUnit(model->getDisplayUnit(), info.amount) + "<br>";
+        html += tr("Amount")+": <font color='#ffffff'>" + BitcoinUnits::formatHtmlWithUnit(model->getDisplayUnit(), info.amount) + "</font><br>";
     if(!info.label.isEmpty())
-        html += "<b>"+tr("Label")+"</b>: " + GUIUtil::HtmlEscape(info.label) + "<br>";
+        html += tr("Label")+": <font color='#ffffff'>" + GUIUtil::HtmlEscape(info.label) + "</font><br>";
     if(!info.message.isEmpty())
-        html += "<b>"+tr("Message")+"</b>: " + GUIUtil::HtmlEscape(info.message) + "<br>";
+        html += tr("Message")+": <font color='#ffffff'>" + GUIUtil::HtmlEscape(info.message) + "</font><br>";
     ui->outUri->setText(html);
 
 #ifdef USE_QRCODE
-    ui->btnSaveAs->setEnabled(createQRCode(ui->lblQRCode, info));
+    if(createQRCode(ui->lblQRCode, info))
+    {
+        ui->lblQRCode->setScaledContents(true);
+        ui->btnSaveAs->setEnabled(true);
+    }
 #endif
 }
 

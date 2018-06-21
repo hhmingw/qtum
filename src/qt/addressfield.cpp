@@ -8,7 +8,6 @@
 #include "base58.h"
 #include "qvalidatedlineedit.h"
 #include "bitcoinaddressvalidator.h"
-#include <boost/foreach.hpp>
 #include <QLineEdit>
 #include <QCompleter>
 
@@ -16,36 +15,62 @@ using namespace std;
 
 AddressField::AddressField(QWidget *parent) :
     QComboBox(parent),
-    m_addressType(AddressField::UTXO)
+    m_addressType(AddressField::UTXO),
+    m_addressTableModel(0),
+    m_addressColumn(0),
+    m_typeRole(Qt::UserRole),
+    m_receive("R")
+
 {
+    // Set editable state
+    setComboBoxEditable(false);
 
-    QValidatedLineEdit *validatedLineEdit = new QValidatedLineEdit(this);
-    validatedLineEdit->setCheckValidator(new BitcoinAddressCheckValidator(parent));
-    this->setLineEdit(validatedLineEdit);
-
+    // Connect signals and slots
     connect(this, SIGNAL(addressTypeChanged(AddressType)), SLOT(on_addressTypeChanged()));
-    setEditable(true);
-    completer()->setCompletionMode(QCompleter::PopupCompletion);
-    connect(lineEdit(), SIGNAL(editingFinished()), this, SLOT(on_editingFinished()));
-
-    // Limit the number of visible items in the list
-    setStyleSheet("combobox-popup: 0;");
-    setMaxVisibleItems(15);
 }
 
 QString AddressField::currentText() const
 {
+    if(isEditable())
+    {
+        return lineEdit()->text();
+    }
+
     int index = currentIndex();
     if(index == -1)
+    {
         return QString();
+    }
 
     return itemText(index);
 }
 
 bool AddressField::isValidAddress()
 {
+    if(!isEditable())
+    {
+        if(currentIndex() != -1)
+            return true;
+        else
+            return false;
+    }
+
     ((QValidatedLineEdit*)lineEdit())->checkValidity();
     return ((QValidatedLineEdit*)lineEdit())->isValid();
+}
+
+void AddressField::setComboBoxEditable(bool editable)
+{
+    QValidatedLineEdit *validatedLineEdit = new QValidatedLineEdit(this);
+    setLineEdit(validatedLineEdit);
+    setEditable(editable);
+    if(editable)
+    {
+        QValidatedLineEdit *validatedLineEdit = (QValidatedLineEdit*)lineEdit();
+        validatedLineEdit->setCheckValidator(new BitcoinAddressCheckValidator(parent()));
+        completer()->setCompletionMode(QCompleter::InlineCompletion);
+        connect(validatedLineEdit, SIGNAL(editingFinished()), this, SLOT(on_editingFinished()));
+    }
 }
 
 void AddressField::on_refresh()
@@ -54,26 +79,50 @@ void AddressField::on_refresh()
     QString currentAddress = currentText();
     m_stringList.clear();
     vector<COutput> vecOutputs;
-    assert(pwalletMain != NULL);
-
-    // Fill the list with address
-    if(m_addressType == AddressField::UTXO)
+    if(!vpwallets.empty())
     {
-        // Fill the list with UTXO
-        LOCK2(cs_main, pwalletMain->cs_wallet);
-        pwalletMain->AvailableCoins(vecOutputs);
+        CWalletRef pwalletMain = vpwallets[0];
+        assert(pwalletMain != NULL);
 
-        BOOST_FOREACH(const COutput& out, vecOutputs) {
-            CTxDestination address;
-            const CScript& scriptPubKey = out.tx->tx->vout[out.i].scriptPubKey;
-            bool fValidAddress = ExtractDestination(scriptPubKey, address);
+        // Fill the list with address
+        if(m_addressType == AddressField::UTXO)
+        {
+            // Fill the list with UTXO
+            LOCK2(cs_main, pwalletMain->cs_wallet);
 
-            if (fValidAddress)
+            // Add all available addresses if 0 address ballance for token is enabled
+            if(m_addressTableModel)
             {
-                QString strAddress = QString::fromStdString(CBitcoinAddress(address).ToString());
-                if(!m_stringList.contains(strAddress))
+                // Fill the list with user defined address
+                for(int row = 0; row < m_addressTableModel->rowCount(); row++)
                 {
-                    m_stringList.append(strAddress);
+                    QModelIndex index = m_addressTableModel->index(row, m_addressColumn);
+                    QString strAddress = m_addressTableModel->data(index).toString();
+                    QString type = m_addressTableModel->data(index, m_typeRole).toString();
+                    if(type == m_receive)
+                    {
+                        appendAddress(strAddress);
+                    }
+                }
+
+                // Include zero or unconfirmed coins too
+                pwalletMain->AvailableCoins(vecOutputs, false, NULL, true);
+            }
+            else
+            {
+                // List only the spendable coins
+                pwalletMain->AvailableCoins(vecOutputs);
+            }
+
+            for(const COutput& out : vecOutputs) {
+                CTxDestination address;
+                const CScript& scriptPubKey = out.tx->tx->vout[out.i].scriptPubKey;
+                bool fValidAddress = ExtractDestination(scriptPubKey, address);
+
+                if (fValidAddress)
+                {
+                    QString strAddress = QString::fromStdString(CBitcoinAddress(address).ToString());
+                    appendAddress(strAddress);
                 }
             }
         }
@@ -95,4 +144,48 @@ void AddressField::on_addressTypeChanged()
 void AddressField::on_editingFinished()
 {
     Q_EMIT editTextChanged(QComboBox::currentText());
+}
+
+void AddressField::appendAddress(const QString &strAddress)
+{
+    CBitcoinAddress address(strAddress.toStdString());
+    if(!vpwallets.empty())
+    {
+        CWalletRef pwalletMain = vpwallets[0];
+        if(!m_stringList.contains(strAddress) &&
+                IsMine(*pwalletMain, address.Get()))
+        {
+            m_stringList.append(strAddress);
+        }
+    }
+}
+
+void AddressField::setReceive(const QString &receive)
+{
+    m_receive = receive;
+}
+
+void AddressField::setTypeRole(int typeRole)
+{
+    m_typeRole = typeRole;
+}
+
+void AddressField::setAddressColumn(int addressColumn)
+{
+    m_addressColumn = addressColumn;
+}
+
+void AddressField::setAddressTableModel(QAbstractItemModel *addressTableModel)
+{
+    if(m_addressTableModel)
+    {
+        disconnect(m_addressTableModel, SIGNAL(rowsInserted(QModelIndex,int,int)), this, SLOT(on_refresh()));
+        disconnect(m_addressTableModel, SIGNAL(rowsRemoved(QModelIndex,int,int)), this, SLOT(on_refresh()));
+    }
+
+    m_addressTableModel = addressTableModel;
+    connect(m_addressTableModel, SIGNAL(rowsInserted(QModelIndex,int,int)), this, SLOT(on_refresh()));
+    connect(m_addressTableModel, SIGNAL(rowsRemoved(QModelIndex,int,int)), this, SLOT(on_refresh()));
+
+    on_refresh();
 }

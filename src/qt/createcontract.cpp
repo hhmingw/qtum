@@ -14,6 +14,9 @@
 #include "abifunctionfield.h"
 #include "contractabi.h"
 #include "tabbarinfo.h"
+#include "contractresult.h"
+#include "sendcoinsdialog.h"
+#include "styleSheet.h"
 
 #include <QRegularExpressionValidator>
 
@@ -39,24 +42,24 @@ CreateContract::CreateContract(const PlatformStyle *platformStyle, QWidget *pare
     m_execRPCCommand(0),
     m_ABIFunctionField(0),
     m_contractABI(0),
-    m_tabInfo(0)
+    m_tabInfo(0),
+    m_results(1)
 {
     // Setup ui components
     Q_UNUSED(platformStyle);
     ui->setupUi(this);
-    ui->groupBoxOptional->setStyleSheet(STYLE_GROUPBOX);
-    ui->groupBoxConstructor->setStyleSheet(STYLE_GROUPBOX);
-    ui->scrollAreaConstructor->setStyleSheet(".QScrollArea {border: none;}");
+
+    // Set stylesheet
+    SetObjectStyleSheet(ui->pushButtonClearAll, StyleSheetNames::ButtonBlack);
+
     setLinkLabels();
-    m_ABIFunctionField = new ABIFunctionField(ABIFunctionField::Constructor, ui->scrollAreaConstructor);
+    m_ABIFunctionField = new ABIFunctionField(platformStyle, ABIFunctionField::Create, ui->scrollAreaConstructor);
     ui->scrollAreaConstructor->setWidget(m_ABIFunctionField);
     ui->labelBytecode->setToolTip(tr("The bytecode of the contract"));
     ui->labelSenderAddress->setToolTip(tr("The quantum address that will be used to create the contract."));
 
     m_tabInfo = new TabBarInfo(ui->stackedWidget);
-    m_tabInfo->addTab(0, tr("CreateContract"));
-    m_tabInfo->addTab(1, tr("Result"));
-    m_tabInfo->setTabVisible(1, false);
+    m_tabInfo->addTab(0, tr("Create Contract"));
 
     // Set defaults
     ui->lineEditGasPrice->setValue(DEFAULT_GAS_PRICE);
@@ -82,8 +85,8 @@ CreateContract::CreateContract(const PlatformStyle *platformStyle, QWidget *pare
     m_contractABI = new ContractABI();
 
     // Connect signals with slots
-    connect(ui->pushButtonClearAll, SIGNAL(clicked()), SLOT(on_clearAll_clicked()));
-    connect(ui->pushButtonCreateContract, SIGNAL(clicked()), SLOT(on_createContract_clicked()));
+    connect(ui->pushButtonClearAll, SIGNAL(clicked()), SLOT(on_clearAllClicked()));
+    connect(ui->pushButtonCreateContract, SIGNAL(clicked()), SLOT(on_createContractClicked()));
     connect(ui->textEditBytecode, SIGNAL(textChanged()), SLOT(on_updateCreateButton()));
     connect(ui->textEditInterface, SIGNAL(textChanged()), SLOT(on_newContractABI()));
     connect(ui->stackedWidget, SIGNAL(currentChanged(int)), SLOT(on_updateCreateButton()));
@@ -106,6 +109,9 @@ void CreateContract::setLinkLabels()
 {
     ui->labelSolidity->setOpenExternalLinks(true);
     ui->labelSolidity->setText("<a href=\"https://ethereum.github.io/browser-solidity/\">Solidity compiler</a>");
+
+    ui->labelToken->setOpenExternalLinks(true);
+    ui->labelToken->setText("<a href=\"https://ethereum.org/token#the-code\">Token template</a>");
 }
 
 void CreateContract::setModel(WalletModel *_model)
@@ -137,8 +143,6 @@ bool CreateContract::isDataValid()
         dataValid = false;
     if(!funcValid)
         dataValid = false;
-    if(!ui->lineEditSenderAddress->isValidAddress())
-        dataValid = false;
 
     return dataValid;
 }
@@ -149,26 +153,31 @@ void CreateContract::setClientModel(ClientModel *_clientModel)
 
     if (m_clientModel)
     {
-        connect(m_clientModel, SIGNAL(numBlocksChanged(int,QDateTime,double,bool)), this, SLOT(on_numBlocksChanged()));
+        connect(m_clientModel, SIGNAL(tipChanged()), this, SLOT(on_numBlocksChanged()));
         on_numBlocksChanged();
     }
 }
 
-void CreateContract::on_clearAll_clicked()
+void CreateContract::on_clearAllClicked()
 {
     ui->textEditBytecode->clear();
     ui->lineEditGasLimit->setValue(DEFAULT_GAS_LIMIT_OP_CREATE);
     ui->lineEditGasPrice->setValue(DEFAULT_GAS_PRICE);
     ui->lineEditSenderAddress->setCurrentIndex(-1);
     ui->textEditInterface->clear();
-    m_tabInfo->setTabVisible(1, false);
-    m_tabInfo->setCurrent(0);
+    m_tabInfo->clear();
 }
 
-void CreateContract::on_createContract_clicked()
+void CreateContract::on_createContractClicked()
 {
     if(isDataValid())
     {
+        WalletModel::UnlockContext ctx(m_model->requestUnlock());
+        if(!ctx.isValid())
+        {
+            return;
+        }
+
         // Initialize variables
         QMap<QString, QString> lstParams;
         QVariant result;
@@ -191,19 +200,32 @@ void CreateContract::on_createContract_clicked()
         QString bytecode = ui->textEditBytecode->toPlainText() + toDataHex(func, errorMessage);
         ExecRPCCommand::appendParam(lstParams, PARAM_BYTECODE, bytecode);
         ExecRPCCommand::appendParam(lstParams, PARAM_GASLIMIT, QString::number(gasLimit));
-        ExecRPCCommand::appendParam(lstParams, PARAM_GASPRICE, BitcoinUnits::format(unit, gasPrice));
+        ExecRPCCommand::appendParam(lstParams, PARAM_GASPRICE, BitcoinUnits::format(unit, gasPrice, false, BitcoinUnits::separatorNever));
         ExecRPCCommand::appendParam(lstParams, PARAM_SENDER, ui->lineEditSenderAddress->currentText());
 
-        // Execute RPC command line
-        if(errorMessage.isEmpty() && m_execRPCCommand->exec(lstParams, result, resultJson, errorMessage))
+        QString questionString = tr("Are you sure you want to create contract? <br />");
+
+        SendConfirmationDialog confirmationDialog(tr("Confirm contract creation."), questionString, 3, this);
+        confirmationDialog.exec();
+        QMessageBox::StandardButton retval = (QMessageBox::StandardButton)confirmationDialog.result();
+        if(retval == QMessageBox::Yes)
         {
-            ui->widgetResult->setResultData(result, FunctionABI(), QStringList(), ContractResult::CreateResult);
-            m_tabInfo->setTabVisible(1, true);
-            m_tabInfo->setCurrent(1);
-        }
-        else
-        {
-            QMessageBox::warning(this, tr("Create contract"), errorMessage);
+            // Execute RPC command line
+            if(errorMessage.isEmpty() && m_execRPCCommand->exec(lstParams, result, resultJson, errorMessage))
+            {
+                ContractResult *widgetResult = new ContractResult(ui->stackedWidget);
+                widgetResult->setResultData(result, FunctionABI(), QList<QStringList>(), ContractResult::CreateResult);
+                ui->stackedWidget->addWidget(widgetResult);
+                int position = ui->stackedWidget->count() - 1;
+                m_results = position == 1 ? 1 : m_results + 1;
+
+                m_tabInfo->addTab(position, tr("Result %1").arg(m_results));
+                m_tabInfo->setCurrent(position);
+            }
+            else
+            {
+                QMessageBox::warning(this, tr("Create contract"), errorMessage);
+            }
         }
     }
 }
@@ -263,7 +285,7 @@ QString CreateContract::toDataHex(int func, QString& errorMessage)
     }
 
     std::string strData;
-    std::vector<std::string> values = m_ABIFunctionField->getValuesVector();
+    std::vector<std::vector<std::string>> values = m_ABIFunctionField->getValuesVector();
     FunctionABI function = m_contractABI->functions[func];
     std::vector<ParameterABI::ErrorType> errors;
     if(function.abiIn(values, strData, errors))
@@ -275,9 +297,4 @@ QString CreateContract::toDataHex(int func, QString& errorMessage)
         errorMessage = function.errorMessage(errors, true);
     }
     return "";
-}
-
-void CreateContract::on_textEditBytecode_textChanged()
-{
-    ui->textEditBytecode->setStyleSheet("");
 }

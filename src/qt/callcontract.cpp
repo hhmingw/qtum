@@ -1,6 +1,7 @@
 #include "callcontract.h"
 #include "ui_callcontract.h"
 #include "platformstyle.h"
+#include "walletmodel.h"
 #include "clientmodel.h"
 #include "guiconstants.h"
 #include "rpcconsole.h"
@@ -8,6 +9,13 @@
 #include "abifunctionfield.h"
 #include "contractabi.h"
 #include "tabbarinfo.h"
+#include "contractresult.h"
+#include "contractbookpage.h"
+#include "editcontractinfodialog.h"
+#include "contracttablemodel.h"
+#include "styleSheet.h"
+#include "guiutil.h"
+#include <QClipboard>
 
 namespace CallContract_NS
 {
@@ -22,29 +30,37 @@ using namespace CallContract_NS;
 CallContract::CallContract(const PlatformStyle *platformStyle, QWidget *parent) :
     QWidget(parent),
     ui(new Ui::CallContract),
+    m_model(0),
     m_clientModel(0),
+    m_contractModel(0),
     m_execRPCCommand(0),
     m_ABIFunctionField(0),
     m_contractABI(0),
-    m_tabInfo(0)
+    m_tabInfo(0),
+    m_results(1)
 {
+    m_platformStyle = platformStyle;
     // Setup ui components
-    Q_UNUSED(platformStyle);
     ui->setupUi(this);
-    ui->groupBoxOptional->setStyleSheet(STYLE_GROUPBOX);
-    ui->groupBoxFunction->setStyleSheet(STYLE_GROUPBOX);
-    ui->scrollAreaFunction->setStyleSheet(".QScrollArea {border: none;}");
-    m_ABIFunctionField = new ABIFunctionField(ABIFunctionField::Function, ui->scrollAreaFunction);
+    ui->saveInfoButton->setIcon(platformStyle->MultiStatesIcon(":/icons/filesave", PlatformStyle::PushButton));
+    ui->loadInfoButton->setIcon(platformStyle->MultiStatesIcon(":/icons/address-book", PlatformStyle::PushButton));
+    ui->pasteAddressButton->setIcon(platformStyle->MultiStatesIcon(":/icons/editpaste", PlatformStyle::PushButton));
+    // Format tool buttons
+    GUIUtil::formatToolButtons(ui->saveInfoButton, ui->loadInfoButton, ui->pasteAddressButton);
+
+    // Set stylesheet
+    SetObjectStyleSheet(ui->pushButtonClearAll, StyleSheetNames::ButtonBlack);
+
+    m_ABIFunctionField = new ABIFunctionField(platformStyle, ABIFunctionField::Call, ui->scrollAreaFunction);
     ui->scrollAreaFunction->setWidget(m_ABIFunctionField);
 
     ui->labelContractAddress->setToolTip(tr("The account address."));
     ui->labelSenderAddress->setToolTip(tr("The sender address hex string."));
     ui->pushButtonCallContract->setEnabled(false);
+    ui->lineEditSenderAddress->setComboBoxEditable(true);
 
     m_tabInfo = new TabBarInfo(ui->stackedWidget);
-    m_tabInfo->addTab(0, tr("CallContract"));
-    m_tabInfo->addTab(1, tr("Result"));
-    m_tabInfo->setTabVisible(1, false);
+    m_tabInfo->addTab(0, tr("Call Contract"));
 
     // Create new PRC command line interface
     QStringList lstMandatory;
@@ -59,11 +75,15 @@ CallContract::CallContract(const PlatformStyle *platformStyle, QWidget *parent) 
     m_contractABI = new ContractABI();
 
     // Connect signals with slots
-    connect(ui->pushButtonClearAll, SIGNAL(clicked()), SLOT(on_clearAll_clicked()));
-    connect(ui->pushButtonCallContract, SIGNAL(clicked()), SLOT(on_callContract_clicked()));
+    connect(ui->pushButtonClearAll, SIGNAL(clicked()), SLOT(on_clearAllClicked()));
+    connect(ui->pushButtonCallContract, SIGNAL(clicked()), SLOT(on_callContractClicked()));
     connect(ui->lineEditContractAddress, SIGNAL(textChanged(QString)), SLOT(on_updateCallContractButton()));
     connect(ui->textEditInterface, SIGNAL(textChanged()), SLOT(on_newContractABI()));
     connect(ui->stackedWidget, SIGNAL(currentChanged(int)), SLOT(on_updateCallContractButton()));
+    connect(ui->saveInfoButton, SIGNAL(clicked()), SLOT(on_saveInfoClicked()));
+    connect(ui->loadInfoButton, SIGNAL(clicked()), SLOT(on_loadInfoClicked()));
+    connect(ui->pasteAddressButton, SIGNAL(clicked()), SLOT(on_pasteAddressClicked()));
+    connect(ui->lineEditContractAddress, SIGNAL(textChanged(QString)), SLOT(on_contractAddressChanged()));
 
     // Set contract address validator
     QRegularExpression regEx;
@@ -85,9 +105,15 @@ void CallContract::setClientModel(ClientModel *_clientModel)
 
     if (m_clientModel)
     {
-        connect(m_clientModel, SIGNAL(numBlocksChanged(int,QDateTime,double,bool)), this, SLOT(on_numBlocksChanged()));
+        connect(m_clientModel, SIGNAL(tipChanged()), this, SLOT(on_numBlocksChanged()));
         on_numBlocksChanged();
     }
+}
+
+void CallContract::setModel(WalletModel *_model)
+{
+    m_model = _model;
+    m_contractModel = m_model->getContractTableModel();
 }
 
 bool CallContract::isValidContractAddress()
@@ -118,16 +144,21 @@ bool CallContract::isDataValid()
     return dataValid;
 }
 
-void CallContract::on_clearAll_clicked()
+void CallContract::setContractAddress(const QString &address)
+{
+    ui->lineEditContractAddress->setText(address);
+    ui->lineEditContractAddress->setFocus();
+}
+
+void CallContract::on_clearAllClicked()
 {
     ui->lineEditContractAddress->clear();
     ui->lineEditSenderAddress->setCurrentIndex(-1);
     ui->textEditInterface->clear();
-    m_tabInfo->setTabVisible(1, false);
-    m_tabInfo->setCurrent(0);
+    m_tabInfo->clear();
 }
 
-void CallContract::on_callContract_clicked()
+void CallContract::on_callContractClicked()
 {
     if(isDataValid())
     {
@@ -146,9 +177,14 @@ void CallContract::on_callContract_clicked()
         // Execute RPC command line
         if(errorMessage.isEmpty() && m_execRPCCommand->exec(lstParams, result, resultJson, errorMessage))
         {
-            ui->widgetResult->setResultData(result, m_contractABI->functions[func], m_ABIFunctionField->getParamsValues(), ContractResult::CallResult);
-            m_tabInfo->setTabVisible(1, true);
-            m_tabInfo->setCurrent(1);
+            ContractResult *widgetResult = new ContractResult(ui->stackedWidget);
+            widgetResult->setResultData(result, m_contractABI->functions[func], m_ABIFunctionField->getParamsValues(), ContractResult::CallResult);
+            ui->stackedWidget->addWidget(widgetResult);
+            int position = ui->stackedWidget->count() - 1;
+            m_results = position == 1 ? 1 : m_results + 1;
+
+            m_tabInfo->addTab(position, tr("Result %1").arg(m_results));
+            m_tabInfo->setCurrent(position);
         }
         else
         {
@@ -195,6 +231,73 @@ void CallContract::on_newContractABI()
     on_updateCallContractButton();
 }
 
+void CallContract::on_saveInfoClicked()
+{
+    if(!m_contractModel)
+        return;
+
+    bool valid = true;
+
+    if(!isValidContractAddress())
+        valid = false;
+
+    if(!isValidInterfaceABI())
+        valid = false;
+
+    if(!valid)
+        return;
+
+    QString contractAddress = ui->lineEditContractAddress->text();
+    int row = m_contractModel->lookupAddress(contractAddress);
+    EditContractInfoDialog::Mode dlgMode = row > -1 ? EditContractInfoDialog::EditContractInfo : EditContractInfoDialog::NewContractInfo;
+    EditContractInfoDialog dlg(dlgMode, this);
+    dlg.setModel(m_contractModel);
+    if(dlgMode == EditContractInfoDialog::EditContractInfo)
+    {
+        dlg.loadRow(row);
+    }
+    dlg.setAddress(ui->lineEditContractAddress->text());
+    dlg.setABI(ui->textEditInterface->toPlainText());
+    if(dlg.exec())
+    {
+        ui->lineEditContractAddress->setText(dlg.getAddress());
+        ui->textEditInterface->setText(dlg.getABI());
+        on_contractAddressChanged();
+    }
+}
+
+void CallContract::on_loadInfoClicked()
+{
+    ContractBookPage dlg(m_platformStyle, this);
+    dlg.setModel(m_model->getContractTableModel());
+    if(dlg.exec())
+    {
+        ui->lineEditContractAddress->setText(dlg.getAddressValue());
+        on_contractAddressChanged();
+    }
+}
+
+void CallContract::on_pasteAddressClicked()
+{
+    setContractAddress(QApplication::clipboard()->text());
+}
+
+void CallContract::on_contractAddressChanged()
+{
+    if(isValidContractAddress() && m_contractModel)
+    {
+        QString contractAddress = ui->lineEditContractAddress->text();
+        if(m_contractModel->lookupAddress(contractAddress) > -1)
+        {
+            QString contractAbi = m_contractModel->abiForAddress(contractAddress);
+            if(ui->textEditInterface->toPlainText() != contractAbi)
+            {
+                ui->textEditInterface->setText(m_contractModel->abiForAddress(contractAddress));
+            }
+        }
+    }
+}
+
 QString CallContract::toDataHex(int func, QString& errorMessage)
 {
     if(func == -1 || m_ABIFunctionField == NULL || m_contractABI == NULL)
@@ -203,7 +306,7 @@ QString CallContract::toDataHex(int func, QString& errorMessage)
     }
 
     std::string strData;
-    std::vector<std::string> values = m_ABIFunctionField->getValuesVector();
+    std::vector<std::vector<std::string>> values = m_ABIFunctionField->getValuesVector();
     FunctionABI function = m_contractABI->functions[func];
     std::vector<ParameterABI::ErrorType> errors;
 

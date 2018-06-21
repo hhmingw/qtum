@@ -6,8 +6,8 @@
 #include <QRegularExpression>
 #include <QStringList>
 
-#define paternUint "^[0-9]{1,}$"
-#define paternInt "^\\-{0,1}[0-9]{1,}$"
+#define paternUint "^[0-9]{1,77}$"
+#define paternInt "^\\-{0,1}[0-9]{1,76}$"
 #define paternAddress "^[a-fA-F0-9]{40,40}$"
 #define paternBool "^true$|^false$"
 #define paternHex "^[a-fA-F0-9]{1,}$"
@@ -134,8 +134,8 @@ public:
 
     ParameterABI(const std::string& _name = "", const std::string& _type = "", bool _indexed = false);
     ~ParameterABI();
-    bool abiIn(const std::string &value, std::string &data, std::map<int, std::string>& mapDynamic) const;
-    bool abiOut(const std::string &data, size_t& pos, std::string &value) const;
+    bool abiIn(const std::vector<std::string> &value, std::string &data, std::map<int, std::string>& mapDynamic) const;
+    bool abiOut(const std::string &data, size_t& pos, std::vector<std::string> &value) const;
     const ParameterType &decodeType() const;
     static bool getRegularExpession(const ParameterType &paramType, QRegularExpression &regEx);
 
@@ -147,7 +147,12 @@ public:
     ErrorType lastError() const;
 
 private:
-    mutable ParameterType* m_decodeType;
+    bool abiInBasic(ParameterType::Type abiType, std::string value, std::string &data) const;
+    bool abiOutBasic(ParameterType::Type abiType, const std::string &data, size_t &pos, std::string &value) const;
+    void addDynamic(const std::string& paramData, std::string &data, std::map<int, std::string>& mapDynamic) const;
+
+
+    mutable ParameterType m_decodeType;
     mutable ErrorType m_lastError;
 };
 
@@ -162,11 +167,13 @@ public:
                 bool _constant = false,
                 bool _anonymous = false);
 
-    bool abiIn(const std::vector<std::string>& values, std::string& data, std::vector<ParameterABI::ErrorType>& errors) const;
+    bool abiIn(const std::vector<std::vector<std::string>>& values, std::string& data, std::vector<ParameterABI::ErrorType>& errors) const;
 
-    bool abiOut(const std::string& data, std::vector<std::string>& values, std::vector<ParameterABI::ErrorType>& errors) const;
+    bool abiOut(const std::string& data, std::vector<std::vector<std::string>>& values, std::vector<ParameterABI::ErrorType>& errors) const;
 
     std::string selector() const;
+
+    static std::string defaultSelector();
 
     QString errorMessage(std::vector<ParameterABI::ErrorType>& errors, bool in) const;
 

@@ -27,26 +27,32 @@ void InitLogging();
 void InitParameterInteraction();
 
 /** Initialize bitcoin core: Basic context setup.
- *  @note This can be done before daemonization.
+ *  @note This can be done before daemonization. Do not call Shutdown() if this function fails.
  *  @pre Parameters should be parsed and config file should be read.
  */
 bool AppInitBasicSetup();
 /**
  * Initialization: parameter interaction.
- * @note This can be done before daemonization.
+ * @note This can be done before daemonization. Do not call Shutdown() if this function fails.
  * @pre Parameters should be parsed and config file should be read, AppInitBasicSetup should have been called.
  */
 bool AppInitParameterInteraction();
 /**
  * Initialization sanity checks: ecc init, sanity checks, dir lock.
- * @note This can be done before daemonization.
+ * @note This can be done before daemonization. Do not call Shutdown() if this function fails.
  * @pre Parameters should be parsed and config file should be read, AppInitParameterInteraction should have been called.
  */
 bool AppInitSanityChecks();
 /**
- * Bitcoin core main initialization.
- * @note This should only be done after daemonization.
+ * Lock bitcoin core data directory.
+ * @note This should only be done after daemonization. Do not call Shutdown() if this function fails.
  * @pre Parameters should be parsed and config file should be read, AppInitSanityChecks should have been called.
+ */
+bool AppInitLockDataDirectory();
+/**
+ * Bitcoin core main initialization.
+ * @note This should only be done after daemonization. Call Shutdown() if this function fails.
+ * @pre Parameters should be parsed and config file should be read, AppInitLockDataDirectory should have been called.
  */
 bool AppInitMain(boost::thread_group& threadGroup, CScheduler& scheduler);
 
@@ -60,5 +66,8 @@ enum HelpMessageMode {
 std::string HelpMessage(HelpMessageMode mode);
 /** Returns licensing information (for -version) */
 std::string LicenseInfo();
+
+/** Unlock the data directory */
+void UnlockDataDirectory();
 
 #endif // BITCOIN_INIT_H

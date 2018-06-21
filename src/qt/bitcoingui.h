@@ -32,7 +32,7 @@ class HelpMessageDialog;
 class ModalOverlay;
 class TitleBar;
 class NavigationBar;
-
+class QtumVersionChecker;
 class CWallet;
 
 QT_BEGIN_NAMESPACE
@@ -41,6 +41,8 @@ class QProgressBar;
 class QProgressDialog;
 class QDockWidget;
 QT_END_NAMESPACE
+
+typedef CWallet* CWalletRef;
 
 /**
   Bitcoin GUI main class. This class represents the main window of the Bitcoin UI. It communicates with both the client and
@@ -114,6 +116,7 @@ private:
     QAction *toggleHideAction;
     QAction *encryptWalletAction;
     QAction *backupWalletAction;
+    QAction *restoreWalletAction;
     QAction *changePassphraseAction;
     QAction *unlockWalletAction;
     QAction *lockWalletAction;
@@ -125,6 +128,10 @@ private:
     QAction* createContractAction;
     QAction* sendToContractAction;
     QAction* callContractAction;
+    QAction* QRCTokenAction;
+    QAction* sendTokenAction;
+    QAction* receiveTokenAction;
+    QAction* addTokenAction;
 
     QSystemTrayIcon *trayIcon;
     QMenu *trayIconMenu;
@@ -132,6 +139,8 @@ private:
     RPCConsole *rpcConsole;
     HelpMessageDialog *helpMessageDialog;
     ModalOverlay *modalOverlay;
+    QtumVersionChecker *qtumVersionChecker;
+    ModalOverlay *modalBackupOverlay;
 
     /** Keep track of previous number of blocks, to detect progress */
     int prevBlocks;
@@ -190,7 +199,7 @@ public Q_SLOTS:
                             @see CClientUIInterface::MessageBoxFlags
        @param[in] ret       pointer to a bool that will be modified to whether Ok was clicked (modal only)
     */
-    void message(const QString &title, const QString &message, unsigned int style, bool *ret = NULL);
+    void message(const QString &title, const QString &message, unsigned int style, bool *ret = nullptr);
 
 #ifdef ENABLE_WALLET
     /** Set the encryption status as shown in the UI.
@@ -209,6 +218,9 @@ public Q_SLOTS:
 
     /** Show incoming transaction notification for new transactions. */
     void incomingTransaction(const QString& date, int unit, const CAmount& amount, const QString& type, const QString& address, const QString& label);
+
+    /** Show incoming transaction notification for new token transactions. */
+    void incomingTokenTransaction(const QString& date, const QString& amount, const QString& type, const QString& address, const QString& label, const QString& title);
 #endif // ENABLE_WALLET
 
     void setTabBarInfo(QObject* into);
@@ -229,6 +241,12 @@ private Q_SLOTS:
     void gotoSendToContractPage();
     /** Switch to call contract page */
     void gotoCallContractPage();
+    /** Switch to Send Token page */
+    void gotoSendTokenPage();
+    /** Switch to Receive Token page */
+    void gotoReceiveTokenPage();
+    /** Switch to Add Token page */
+    void gotoAddTokenPage();
 
     /** Show Sign/Verify Message dialog and switch to sign message tab */
     void gotoSignMessageTab(QString addr = "");
@@ -257,8 +275,6 @@ private Q_SLOTS:
     void showNormalIfMinimized(bool fToggleHidden = false);
     /** Simply calls showNormalIfMinimized(true) for use in SLOT() macro */
     void toggleHidden();
-    /** Update the current weight of the wallet **/
-    void updateWeight();
     /** Update staking icon **/
     void updateStakingIcon();
 
@@ -275,6 +291,12 @@ private Q_SLOTS:
     void toggleNetworkActive();
 
     void showModalOverlay();
+
+    void showModalBackupOverlay();
+
+private:
+    /** Update the current weight of the wallet **/
+    void updateWeight(CWalletRef pwalletMain);
 };
 
 class UnitDisplayStatusBarControl : public QLabel

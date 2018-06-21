@@ -1,13 +1,15 @@
 #include "abifunctionfield.h"
 #include "abiparamsfield.h"
 #include "contractabi.h"
+#include "platformstyle.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QStringListModel>
+#include <QPainter>
 
 #include <iostream>
-ABIFunctionField::ABIFunctionField(FunctionType type, QWidget *parent) :
+ABIFunctionField::ABIFunctionField(const PlatformStyle *platformStyle, FunctionType type, QWidget *parent) :
     QWidget(parent),
     m_contractABI(0),
     m_func(new QWidget(this)),
@@ -15,13 +17,14 @@ ABIFunctionField::ABIFunctionField(FunctionType type, QWidget *parent) :
     m_paramsField(new QStackedWidget(this)),
     m_functionType(type)
 {
+    m_platformStyle = platformStyle;
     // Setup layouts
     m_comboBoxFunc->setFixedWidth(370);
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
-    mainLayout->setSpacing(12);
+    mainLayout->setSpacing(10);
     mainLayout->setContentsMargins(0, 0, 0, 0);
 
-    QHBoxLayout *topLayout = new QHBoxLayout(this);
+    QHBoxLayout *topLayout = new QHBoxLayout(m_func);
     topLayout->setSpacing(10);
     topLayout->setContentsMargins(0, 0, 0, 0);
 
@@ -53,16 +56,27 @@ void ABIFunctionField::updateABIFunctionField()
         std::vector<FunctionABI> functions = m_contractABI->functions;
         QStringList functionList;
         QStringListModel *functionModel = new QStringListModel(this);
+        bool bFieldCreate = m_functionType == Create;
+        bool bFieldCall = m_functionType == Call;
+        bool bFieldSendTo = m_functionType == SendTo;
+        bool bFieldFunc = bFieldCall || bFieldSendTo;
         for (int func = 0; func < (int)functions.size(); ++func)
         {
             const FunctionABI &function = functions[func];
-            if((m_functionType == Constructor && function.type != "constructor") ||
-                    (m_functionType == Function && function.type == "constructor"))
+            bool bTypeConstructor = function.type == "constructor";
+            bool bTypeEvent = function.type == "event";
+            bool bTypeDefault = function.type == "default";
+            bool bIsConstant = function.constant;
+            if((bFieldCreate && !bTypeConstructor) ||
+                    (bFieldFunc && bTypeConstructor) ||
+                    (bFieldFunc && bTypeEvent) ||
+                    (bFieldCall && !bIsConstant && !bTypeDefault) ||
+                    (bFieldSendTo && bIsConstant && !bTypeDefault))
             {
                 continue;
             }
 
-            ABIParamsField *abiParamsField = new ABIParamsField(this);
+            ABIParamsField *abiParamsField = new ABIParamsField(m_platformStyle, this);
             abiParamsField->updateParamsField(function);
 
             m_paramsField->addWidget(abiParamsField);
@@ -75,7 +89,7 @@ void ABIFunctionField::updateABIFunctionField()
         functionModel->setStringList(functionList);
         m_comboBoxFunc->setModel(functionModel);
 
-        if(m_functionType == Function)
+        if(bFieldFunc)
         {
             bool visible = m_abiFunctionList.size() > 0;
             m_func->setVisible(visible);
@@ -96,29 +110,49 @@ void ABIFunctionField::clear()
     }
 }
 
+void ABIFunctionField::paintEvent(QPaintEvent *)
+{
+    QStyleOption opt;
+    opt.init(this);
+    QPainter p(this);
+    style()->drawPrimitive(QStyle::PE_Widget, &opt, &p, this);
+}
+
 void ABIFunctionField::setContractABI(ContractABI *contractABI)
 {
     m_contractABI = contractABI;
     updateABIFunctionField();
 }
 
-QString ABIFunctionField::getParamValue(int paramID)
+QStringList ABIFunctionField::getParamValue(int paramID)
 {
+    if(m_paramsField->currentWidget() == 0)
+        return QStringList();
+
     return ((ABIParamsField*)m_paramsField->currentWidget())->getParamValue(paramID);
 }
 
-QStringList ABIFunctionField::getParamsValues()
+QList<QStringList> ABIFunctionField::getParamsValues()
 {
+    if(m_paramsField->currentWidget() == 0)
+        return QList<QStringList>();
+
     return ((ABIParamsField*)m_paramsField->currentWidget())->getParamsValues();
 }
 
-std::vector<std::string> ABIFunctionField::getValuesVector()
+std::vector<std::vector<std::string>> ABIFunctionField::getValuesVector()
 {
-    QStringList qlist = getParamsValues();
-    std::vector<std::string> result(qlist.size());
+    QList<QStringList> qlist = getParamsValues();
+    std::vector<std::vector<std::string>> result;
     for (int i=0; i<qlist.size(); i++)
     {
-      result[i] = qlist.at(i).toUtf8().data();
+        std::vector<std::string> itemParam;
+        QStringList qlistVlaues = qlist[i];
+        for(int j=0; j<qlistVlaues.size(); j++)
+        {
+            itemParam.push_back(qlistVlaues.at(j).toUtf8().data());
+        }
+        result.push_back(itemParam);
     }
     return result;
 }
@@ -135,6 +169,9 @@ int ABIFunctionField::getSelectedFunction() const
 
 bool ABIFunctionField::isValid()
 {
+    if(m_paramsField->currentWidget() == 0)
+        return true;
+
     return ((ABIParamsField*)m_paramsField->currentWidget())->isValid();
 }
 
@@ -149,5 +186,6 @@ void ABIFunctionField::on_currentIndexChanged()
         QWidget* pPage = m_paramsField->widget(i);
         pPage->setSizePolicy(policy, policy);
     }
+    Q_EMIT(functionChanged());
 }
 

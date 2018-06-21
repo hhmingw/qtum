@@ -76,6 +76,12 @@ public Q_SLOTS:
     void gotoSendToContractPage();
     /** Switch to call contract page */
     void gotoCallContractPage();
+    /** Switch to Send Token page */
+    void gotoSendTokenPage();
+    /** Switch to Receive Token page */
+    void gotoReceiveTokenPage();
+    /** Switch to Add Token page */
+    void gotoAddTokenPage();
 
     /** Show Sign/Verify Message dialog and switch to sign message tab */
     void gotoSignMessageTab(QString addr = "");
@@ -86,12 +92,15 @@ public Q_SLOTS:
     void encryptWallet(bool status);
     /** Backup the wallet */
     void backupWallet();
+    /** Restore the wallet */
+    void restoreWallet();
     /** Change encrypted wallet passphrase */
     void changePassphrase();
     /** Ask for passphrase to unlock wallet temporarily */
     void unlockWallet();
     /** Lock the wallet */
     void lockWallet();
+
     /** Show used sending addresses */
     void usedSendingAddresses();
     /** Show used receiving addresses */

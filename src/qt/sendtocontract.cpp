@@ -13,6 +13,14 @@
 #include "abifunctionfield.h"
 #include "contractabi.h"
 #include "tabbarinfo.h"
+#include "contractresult.h"
+#include "contractbookpage.h"
+#include "editcontractinfodialog.h"
+#include "contracttablemodel.h"
+#include "styleSheet.h"
+#include "guiutil.h"
+#include "sendcoinsdialog.h"
+#include <QClipboard>
 
 namespace SendToContract_NS
 {
@@ -35,27 +43,36 @@ SendToContract::SendToContract(const PlatformStyle *platformStyle, QWidget *pare
     ui(new Ui::SendToContract),
     m_model(0),
     m_clientModel(0),
+    m_contractModel(0),
     m_execRPCCommand(0),
     m_ABIFunctionField(0),
     m_contractABI(0),
-    m_tabInfo(0)
+    m_tabInfo(0),
+    m_results(1)
 {
+    m_platformStyle = platformStyle;
+
     // Setup ui components
     Q_UNUSED(platformStyle);
     ui->setupUi(this);
-    ui->groupBoxOptional->setStyleSheet(STYLE_GROUPBOX);
-    ui->groupBoxFunction->setStyleSheet(STYLE_GROUPBOX);
-    ui->scrollAreaFunction->setStyleSheet(".QScrollArea {border: none;}");
-    m_ABIFunctionField = new ABIFunctionField(ABIFunctionField::Function, ui->scrollAreaFunction);
+    ui->saveInfoButton->setIcon(platformStyle->MultiStatesIcon(":/icons/filesave", PlatformStyle::PushButton));
+    ui->loadInfoButton->setIcon(platformStyle->MultiStatesIcon(":/icons/address-book", PlatformStyle::PushButton));
+    ui->pasteAddressButton->setIcon(platformStyle->MultiStatesIcon(":/icons/editpaste", PlatformStyle::PushButton));
+    // Format tool buttons
+    GUIUtil::formatToolButtons(ui->saveInfoButton, ui->loadInfoButton, ui->pasteAddressButton);
+
+    // Set stylesheet
+    SetObjectStyleSheet(ui->pushButtonClearAll, StyleSheetNames::ButtonBlack);
+
+    m_ABIFunctionField = new ABIFunctionField(platformStyle, ABIFunctionField::SendTo, ui->scrollAreaFunction);
     ui->scrollAreaFunction->setWidget(m_ABIFunctionField);
+    ui->lineEditAmount->setEnabled(true);
     ui->labelContractAddress->setToolTip(tr("The contract address that will receive the funds and data."));
     ui->labelAmount->setToolTip(tr("The amount in QTUM to send. Default = 0."));
     ui->labelSenderAddress->setToolTip(tr("The quantum address that will be used as sender."));
 
     m_tabInfo = new TabBarInfo(ui->stackedWidget);
-    m_tabInfo->addTab(0, tr("SendToContract"));
-    m_tabInfo->addTab(1, tr("Result"));
-    m_tabInfo->setTabVisible(1, false);
+    m_tabInfo->addTab(0, tr("Send To Contract"));
 
     // Set defaults
     ui->lineEditGasPrice->setValue(DEFAULT_GAS_PRICE);
@@ -63,6 +80,7 @@ SendToContract::SendToContract(const PlatformStyle *platformStyle, QWidget *pare
     ui->lineEditGasLimit->setMinimum(MINIMUM_GAS_LIMIT);
     ui->lineEditGasLimit->setMaximum(DEFAULT_GAS_LIMIT_OP_SEND);
     ui->lineEditGasLimit->setValue(DEFAULT_GAS_LIMIT_OP_SEND);
+    ui->textEditInterface->setIsValidManually(true);
     ui->pushButtonSendToContract->setEnabled(false);
 
     // Create new PRC command line interface
@@ -84,11 +102,16 @@ SendToContract::SendToContract(const PlatformStyle *platformStyle, QWidget *pare
     m_contractABI = new ContractABI();
 
     // Connect signals with slots
-    connect(ui->pushButtonClearAll, SIGNAL(clicked()), SLOT(on_clearAll_clicked()));
-    connect(ui->pushButtonSendToContract, SIGNAL(clicked()), SLOT(on_sendToContract_clicked()));
+    connect(ui->pushButtonClearAll, SIGNAL(clicked()), SLOT(on_clearAllClicked()));
+    connect(ui->pushButtonSendToContract, SIGNAL(clicked()), SLOT(on_sendToContractClicked()));
     connect(ui->lineEditContractAddress, SIGNAL(textChanged(QString)), SLOT(on_updateSendToContractButton()));
     connect(ui->textEditInterface, SIGNAL(textChanged()), SLOT(on_newContractABI()));
     connect(ui->stackedWidget, SIGNAL(currentChanged(int)), SLOT(on_updateSendToContractButton()));
+    connect(m_ABIFunctionField, SIGNAL(functionChanged()), SLOT(on_functionChanged()));
+    connect(ui->saveInfoButton, SIGNAL(clicked()), SLOT(on_saveInfoClicked()));
+    connect(ui->loadInfoButton, SIGNAL(clicked()), SLOT(on_loadInfoClicked()));
+    connect(ui->pasteAddressButton, SIGNAL(clicked()), SLOT(on_pasteAddressClicked()));
+    connect(ui->lineEditContractAddress, SIGNAL(textChanged(QString)), SLOT(on_contractAddressChanged()));
 
     // Set contract address validator
     QRegularExpression regEx;
@@ -107,6 +130,7 @@ SendToContract::~SendToContract()
 void SendToContract::setModel(WalletModel *_model)
 {
     m_model = _model;
+    m_contractModel = m_model->getContractTableModel();
 }
 
 bool SendToContract::isValidContractAddress()
@@ -131,9 +155,13 @@ bool SendToContract::isDataValid()
         dataValid = false;
     if(!m_ABIFunctionField->isValid())
         dataValid = false;
-    if(!ui->lineEditSenderAddress->isValidAddress())
-        dataValid = false;
     return dataValid;
+}
+
+void SendToContract::setContractAddress(const QString &address)
+{
+    ui->lineEditContractAddress->setText(address);
+    ui->lineEditContractAddress->setFocus();
 }
 
 void SendToContract::setClientModel(ClientModel *_clientModel)
@@ -142,27 +170,34 @@ void SendToContract::setClientModel(ClientModel *_clientModel)
 
     if (m_clientModel)
     {
-        connect(m_clientModel, SIGNAL(numBlocksChanged(int,QDateTime,double,bool)), this, SLOT(on_numBlocksChanged()));
+        connect(m_clientModel, SIGNAL(tipChanged()), this, SLOT(on_numBlocksChanged()));
         on_numBlocksChanged();
     }
 }
 
-void SendToContract::on_clearAll_clicked()
+void SendToContract::on_clearAllClicked()
 {
     ui->lineEditContractAddress->clear();
     ui->lineEditAmount->clear();
+    ui->lineEditAmount->setEnabled(true);
     ui->lineEditGasLimit->setValue(DEFAULT_GAS_LIMIT_OP_SEND);
     ui->lineEditGasPrice->setValue(DEFAULT_GAS_PRICE);
     ui->lineEditSenderAddress->setCurrentIndex(-1);
     ui->textEditInterface->clear();
-    m_tabInfo->setTabVisible(1, false);
-    m_tabInfo->setCurrent(0);
+    ui->textEditInterface->setIsValidManually(true);
+    m_tabInfo->clear();
 }
 
-void SendToContract::on_sendToContract_clicked()
+void SendToContract::on_sendToContractClicked()
 {
     if(isDataValid())
     {
+        WalletModel::UnlockContext ctx(m_model->requestUnlock());
+        if(!ctx.isValid())
+        {
+            return;
+        }
+
         // Initialize variables
         QMap<QString, QString> lstParams;
         QVariant result;
@@ -184,21 +219,37 @@ void SendToContract::on_sendToContract_clicked()
         // Append params to the list
         ExecRPCCommand::appendParam(lstParams, PARAM_ADDRESS, ui->lineEditContractAddress->text());
         ExecRPCCommand::appendParam(lstParams, PARAM_DATAHEX, toDataHex(func, errorMessage));
-        ExecRPCCommand::appendParam(lstParams, PARAM_AMOUNT, BitcoinUnits::format(unit, ui->lineEditAmount->value()));
+        QString amount = isFunctionPayable() ? BitcoinUnits::format(unit, ui->lineEditAmount->value(), false, BitcoinUnits::separatorNever) : "0";
+        ExecRPCCommand::appendParam(lstParams, PARAM_AMOUNT, amount);
         ExecRPCCommand::appendParam(lstParams, PARAM_GASLIMIT, QString::number(gasLimit));
-        ExecRPCCommand::appendParam(lstParams, PARAM_GASPRICE, BitcoinUnits::format(unit, gasPrice));
+        ExecRPCCommand::appendParam(lstParams, PARAM_GASPRICE, BitcoinUnits::format(unit, gasPrice, false, BitcoinUnits::separatorNever));
         ExecRPCCommand::appendParam(lstParams, PARAM_SENDER, ui->lineEditSenderAddress->currentText());
 
-        // Execute RPC command line
-        if(errorMessage.isEmpty() && m_execRPCCommand->exec(lstParams, result, resultJson, errorMessage))
+        QString questionString = tr("Are you sure you want to send to the contract: <br /><br />");
+        questionString.append(tr("<b>%1</b>?")
+                              .arg(ui->lineEditContractAddress->text()));
+
+        SendConfirmationDialog confirmationDialog(tr("Confirm sending to contract."), questionString, 3, this);
+        confirmationDialog.exec();
+        QMessageBox::StandardButton retval = (QMessageBox::StandardButton)confirmationDialog.result();
+        if(retval == QMessageBox::Yes)
         {
-            ui->widgetResult->setResultData(result, m_contractABI->functions[func], m_ABIFunctionField->getParamsValues(), ContractResult::SendToResult);
-            m_tabInfo->setTabVisible(1, true);
-            m_tabInfo->setCurrent(1);
-        }
-        else
-        {
-            QMessageBox::warning(this, tr("Send to contract"), errorMessage);
+            // Execute RPC command line
+            if(errorMessage.isEmpty() && m_execRPCCommand->exec(lstParams, result, resultJson, errorMessage))
+            {
+                ContractResult *widgetResult = new ContractResult(ui->stackedWidget);
+                widgetResult->setResultData(result, FunctionABI(), m_ABIFunctionField->getParamsValues(), ContractResult::SendToResult);
+                ui->stackedWidget->addWidget(widgetResult);
+                int position = ui->stackedWidget->count() - 1;
+                m_results = position == 1 ? 1 : m_results + 1;
+
+                m_tabInfo->addTab(position, tr("Result %1").arg(m_results));
+                m_tabInfo->setCurrent(position);
+            }
+            else
+            {
+                QMessageBox::warning(this, tr("Send to contract"), errorMessage);
+            }
         }
     }
 }
@@ -224,7 +275,7 @@ void SendToContract::on_numBlocksChanged()
 void SendToContract::on_updateSendToContractButton()
 {
     int func = m_ABIFunctionField->getSelectedFunction();
-    bool enabled = func != -1;
+    bool enabled = func >= -1;
     if(ui->lineEditContractAddress->text().isEmpty())
     {
         enabled = false;
@@ -251,15 +302,93 @@ void SendToContract::on_newContractABI()
     on_updateSendToContractButton();
 }
 
+void SendToContract::on_functionChanged()
+{
+    bool payable = isFunctionPayable();
+    ui->lineEditAmount->setEnabled(payable);
+    if(!payable)
+    {
+        ui->lineEditAmount->clear();
+    }
+}
+
+void SendToContract::on_saveInfoClicked()
+{
+    if(!m_contractModel)
+        return;
+
+    bool valid = true;
+
+    if(!isValidContractAddress())
+        valid = false;
+
+    if(!isValidInterfaceABI())
+        valid = false;
+
+    if(!valid)
+        return;
+
+    QString contractAddress = ui->lineEditContractAddress->text();
+    int row = m_contractModel->lookupAddress(contractAddress);
+    EditContractInfoDialog::Mode dlgMode = row > -1 ? EditContractInfoDialog::EditContractInfo : EditContractInfoDialog::NewContractInfo;
+    EditContractInfoDialog dlg(dlgMode, this);
+    dlg.setModel(m_contractModel);
+    if(dlgMode == EditContractInfoDialog::EditContractInfo)
+    {
+        dlg.loadRow(row);
+    }
+    dlg.setAddress(ui->lineEditContractAddress->text());
+    dlg.setABI(ui->textEditInterface->toPlainText());
+    if(dlg.exec())
+    {
+        ui->lineEditContractAddress->setText(dlg.getAddress());
+        ui->textEditInterface->setText(dlg.getABI());
+        on_contractAddressChanged();
+    }
+}
+
+void SendToContract::on_loadInfoClicked()
+{
+    ContractBookPage dlg(m_platformStyle, this);
+    dlg.setModel(m_model->getContractTableModel());
+    if(dlg.exec())
+    {
+        ui->lineEditContractAddress->setText(dlg.getAddressValue());
+        on_contractAddressChanged();
+    }
+}
+
+void SendToContract::on_pasteAddressClicked()
+{
+    setContractAddress(QApplication::clipboard()->text());
+}
+
+void SendToContract::on_contractAddressChanged()
+{
+    if(isValidContractAddress() && m_contractModel)
+    {
+        QString contractAddress = ui->lineEditContractAddress->text();
+        if(m_contractModel->lookupAddress(contractAddress) > -1)
+        {
+            QString contractAbi = m_contractModel->abiForAddress(contractAddress);
+            if(ui->textEditInterface->toPlainText() != contractAbi)
+            {
+                ui->textEditInterface->setText(m_contractModel->abiForAddress(contractAddress));
+            }
+        }
+    }
+}
+
 QString SendToContract::toDataHex(int func, QString& errorMessage)
 {
     if(func == -1 || m_ABIFunctionField == NULL || m_contractABI == NULL)
     {
-        return "";
+        std::string defSelector = FunctionABI::defaultSelector();
+        return QString::fromStdString(defSelector);
     }
 
     std::string strData;
-    std::vector<std::string> values = m_ABIFunctionField->getValuesVector();
+    std::vector<std::vector<std::string>> values = m_ABIFunctionField->getValuesVector();
     FunctionABI function = m_contractABI->functions[func];
     std::vector<ParameterABI::ErrorType> errors;
     if(function.abiIn(values, strData, errors))
@@ -271,4 +400,12 @@ QString SendToContract::toDataHex(int func, QString& errorMessage)
         errorMessage = function.errorMessage(errors, true);
     }
     return "";
+}
+
+bool SendToContract::isFunctionPayable()
+{
+    int func = m_ABIFunctionField->getSelectedFunction();
+    if(func < 0) return true;
+    FunctionABI function = m_contractABI->functions[func];
+    return function.payable;
 }

@@ -6,6 +6,7 @@
 #define BITCOIN_QT_GUIUTIL_H
 
 #include "amount.h"
+#include "fs.h"
 
 #include <QEvent>
 #include <QHeaderView>
@@ -15,8 +16,7 @@
 #include <QString>
 #include <QTableView>
 #include <QLabel>
-
-#include <boost/filesystem.hpp>
+#include <QToolButton>
 
 class QValidatedLineEdit;
 class SendCoinsRecipient;
@@ -64,6 +64,13 @@ namespace GUIUtil
        @see  TransactionView::copyLabel, TransactionView::copyAmount, TransactionView::copyAddress
      */
     void copyEntryData(QAbstractItemView *view, int column, int role=Qt::EditRole);
+
+    /** Copy a field of the currently selected entry of a view to the clipboard. Does nothing if nothing
+        is selected.
+       @param[in] role    Data role to extract from the model
+       @see  QRCToken::copyTokenAddress
+     */
+    void copyEntryDataFromList(QAbstractItemView *view, int role=Qt::EditRole);
 
     /** Return a field of the currently selected entry as a QString. Does nothing if nothing
         is selected.
@@ -114,6 +121,9 @@ namespace GUIUtil
     // Open debug.log
     void openDebugLogfile();
 
+    // Open the config file
+    bool openBitcoinConf();
+
     // Replace invalid default fonts with known good ones
     void SubstituteFonts(const QString& language);
 
@@ -150,7 +160,7 @@ namespace GUIUtil
         Q_OBJECT
 
         public:
-            TableViewLastColumnResizingFixer(QTableView* table, int lastColMinimumWidth, int allColsMinimumWidth, QObject *parent);
+            TableViewLastColumnResizingFixer(QTableView* table, int lastColMinimumWidth, int allColsMinimumWidth, QObject *parent, int columnStretch = 2);
             void stretchColumnWidth(int column);
 
         private:
@@ -177,16 +187,11 @@ namespace GUIUtil
     bool GetStartOnSystemStartup();
     bool SetStartOnSystemStartup(bool fAutoStart);
 
-    /** Save window size and position */
-    void saveWindowGeometry(const QString& strSetting, QWidget *parent);
-    /** Restore window size and position */
-    void restoreWindowGeometry(const QString& strSetting, const QSize &defaultSizeIn, QWidget *parent);
-
     /* Convert QString to OS specific boost path through UTF-8 */
-    boost::filesystem::path qstringToBoostPath(const QString &path);
+    fs::path qstringToBoostPath(const QString &path);
 
     /* Convert OS specific boost path to QString through UTF-8 */
-    QString boostPathToQString(const boost::filesystem::path &path);
+    QString boostPathToQString(const fs::path &path);
 
     /* Convert seconds into a QString with days, hours, mins, secs */
     QString formatDurationStr(int secs);
@@ -241,6 +246,8 @@ namespace GUIUtil
 #else
     typedef ClickableProgressBar ProgressBar;
 #endif
+
+    void formatToolButtons(QToolButton* btn1, QToolButton* btn2 = 0, QToolButton* btn3 = 0);
 
 } // namespace GUIUtil
 

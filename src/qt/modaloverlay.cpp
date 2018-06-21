@@ -6,22 +6,30 @@
 #include "ui_modaloverlay.h"
 
 #include "guiutil.h"
+#include "styleSheet.h"
 
 #include "chainparams.h"
 
 #include <QResizeEvent>
 #include <QPropertyAnimation>
 
-ModalOverlay::ModalOverlay(QWidget *parent) :
+ModalOverlay::ModalOverlay(QWidget *parent, OverlayType _type) :
 QWidget(parent),
 ui(new Ui::ModalOverlay),
 bestHeaderHeight(0),
 bestHeaderDate(QDateTime()),
 layerIsVisible(false),
-userClosed(false)
+userClosed(false),
+type(_type)
 {
     ui->setupUi(this);
+
+    // Set stylesheet
+    SetObjectStyleSheet(ui->warningIcon, StyleSheetNames::ButtonTransparent);
+    SetObjectStyleSheet(ui->warningIconBackup, StyleSheetNames::ButtonTransparent);
+
     connect(ui->closeButton, SIGNAL(clicked()), this, SLOT(closeClicked()));
+    connect(ui->walletBackupButton, SIGNAL(clicked()), this, SLOT(backupWalletClicked()));
     if (parent) {
         parent->installEventFilter(this);
         raise();
@@ -29,6 +37,8 @@ userClosed(false)
 
     blockProcessTime.clear();
     setVisible(false);
+
+    ui->stackedWidget->setCurrentIndex(type);
 }
 
 ModalOverlay::~ModalOverlay()
@@ -99,15 +109,18 @@ void ModalOverlay::tipUpdate(int count, const QDateTime& blockDate, double nVeri
                 progressDelta = progressStart-sample.second;
                 timeDelta = blockProcessTime[0].first - sample.first;
                 progressPerHour = progressDelta/(double)timeDelta*1000*3600;
-                remainingMSecs = remainingProgress / progressDelta * timeDelta;
+                remainingMSecs = (progressDelta > 0) ? remainingProgress / progressDelta * timeDelta : -1;
                 break;
             }
         }
         // show progress increase per hour
         ui->progressIncreasePerH->setText(QString::number(progressPerHour*100, 'f', 2)+"%");
 
-        // show expected remaining time
-        ui->expectedTimeLeft->setText(GUIUtil::formatNiceTimeOffset(remainingMSecs/1000.0));
+        if(remainingMSecs >= 0) {	
+            ui->expectedTimeLeft->setText(GUIUtil::formatNiceTimeOffset(remainingMSecs / 1000.0));
+        } else {
+            ui->expectedTimeLeft->setText(QObject::tr("unknown"));
+        }
 
         static const int MAX_SAMPLES = 5000;
         if (blockProcessTime.count() > MAX_SAMPLES)
@@ -126,7 +139,7 @@ void ModalOverlay::tipUpdate(int count, const QDateTime& blockDate, double nVeri
         return;
 
     // estimate the number of headers left based on nPowTargetSpacing
-    // and check if the gui is not aware of the the best header (happens rarely)
+    // and check if the gui is not aware of the best header (happens rarely)
     int estimateNumHeadersLeft = bestHeaderDate.secsTo(currentDate) / Params().GetConsensus().nPowTargetSpacing;
     bool hasBestHeader = bestHeaderHeight >= count;
 
@@ -169,4 +182,10 @@ void ModalOverlay::closeClicked()
 {
     showHide(true);
     userClosed = true;
+}
+
+void ModalOverlay::backupWalletClicked()
+{
+    Q_EMIT backupWallet();
+    showHide(true, true);
 }

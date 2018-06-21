@@ -6,6 +6,8 @@
 
 #include "bitcoingui.h"
 #include "walletview.h"
+#include "tabbarinfo.h"
+#include "wallet/wallet.h"
 
 #include <cstdio>
 
@@ -21,8 +23,6 @@ WalletFrame::WalletFrame(const PlatformStyle *_platformStyle, BitcoinGUI *_gui) 
     QHBoxLayout *walletFrameLayout = new QHBoxLayout(this);
     setContentsMargins(0,0,0,0);
     walletStack = new QStackedWidget(this);
-    walletStack->setObjectName("walletStack");
-    walletStack->setStyleSheet("#walletStack {border: 1px solid #c4c1bd;}");
     walletFrameLayout->setContentsMargins(0,0,0,0);
     walletFrameLayout->addWidget(walletStack);
 
@@ -126,6 +126,27 @@ void WalletFrame::gotoHistoryPage()
         i.value()->gotoHistoryPage();
 }
 
+void WalletFrame::gotoSendTokenPage()
+{
+    QMap<QString, WalletView*>::const_iterator i;
+    for (i = mapWalletViews.constBegin(); i != mapWalletViews.constEnd(); ++i)
+        i.value()->gotoSendTokenPage();
+}
+
+void WalletFrame::gotoReceiveTokenPage()
+{
+    QMap<QString, WalletView*>::const_iterator i;
+    for (i = mapWalletViews.constBegin(); i != mapWalletViews.constEnd(); ++i)
+        i.value()->gotoReceiveTokenPage();
+}
+
+void WalletFrame::gotoAddTokenPage()
+{
+    QMap<QString, WalletView*>::const_iterator i;
+    for (i = mapWalletViews.constBegin(); i != mapWalletViews.constEnd(); ++i)
+        i.value()->gotoAddTokenPage();
+}
+
 void WalletFrame::gotoReceiveCoinsPage()
 {
     QMap<QString, WalletView*>::const_iterator i;
@@ -189,6 +210,13 @@ void WalletFrame::backupWallet()
         walletView->backupWallet();
 }
 
+void WalletFrame::restoreWallet()
+{
+    WalletView *walletView = currentWalletView();
+    if (walletView)
+        walletView->restoreWallet();
+}
+
 void WalletFrame::changePassphrase()
 {
     WalletView *walletView = currentWalletView();
@@ -210,7 +238,10 @@ void WalletFrame::lockWallet()
 {
     WalletView *walletView = currentWalletView();
     if (walletView)
+    {
         walletView->lockWallet();
+        fWalletUnlockStakingOnly = false;
+    }
 }
 
 void WalletFrame::usedSendingAddresses()
@@ -246,7 +277,7 @@ void WalletFrame::pageChanged(int index)
         if(walletView->count() > index)
         {
             QWidget* currentPage = walletView->widget(index);
-            QObject* info = currentPage->findChild<QObject *>("appTabBarInfo");
+            QObject* info = currentPage->findChild<TabBarInfo *>("");
             gui->setTabBarInfo(info);
         }
     }
