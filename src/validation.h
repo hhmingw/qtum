@@ -36,6 +36,7 @@
 #include <qtum/qtumstate.h>
 #include <qtum/qtumDGP.h>
 #include <libethereum/ChainParams.h>
+#include <libethereum/LastBlockHashesFace.h>
 #include <libethashseal/Ethash.h>
 #include <libethashseal/GenesisInfo.h>
 #include <script/standard.h>
@@ -668,6 +669,35 @@ private:
 
 };
 
+class LastHashes : public dev::eth::LastBlockHashesFace {
+
+public:
+
+	explicit LastHashes(CBlockIndex const* _tip): m_tip(_tip) {}
+
+    dev::h256s precedingHashes(dev::h256 const& _mostRecentHash) const override
+    {
+        CBlockIndex* temp_tip = const_cast<CBlockIndex*>(m_tip);
+        m_lastHashes.resize(256);
+        for(unsigned i=0; i < 256; i++){
+            if(!temp_tip)
+                break;
+            m_lastHashes[i] = uintToh256(*temp_tip->phashBlock);
+            temp_tip = temp_tip->pprev;
+        }
+		return m_lastHashes;
+    }
+
+    void clear() override
+    {
+        m_lastHashes.clear();
+    }
+
+private:
+    CBlockIndex const* m_tip;
+    mutable dev::h256s m_lastHashes;
+};
+
 class ByteCodeExec {
 
 public:
@@ -694,7 +724,10 @@ private:
 
     const uint64_t blockGasLimit;
 
+    std::unique_ptr<LastHashes> lasthashes;
+
 };
+
 ////////////////////////////////////////////////////////
 
 #endif // BITCOIN_VALIDATION_H

@@ -2166,21 +2166,13 @@ bool ByteCodeExec::processingResults(ByteCodeExecResult& resultBCE){
 }
 
 dev::eth::EnvInfo ByteCodeExec::BuildEVMEnvironment(){
-    dev::eth::EnvInfo env;
     CBlockIndex* tip = chainActive.Tip();
-    env.setNumber(dev::u256(tip->nHeight + 1));
-    env.setTimestamp(dev::u256(block.nTime));
+    lasthashes = std::unique_ptr<LastHashes>(new LastHashes(std::move(tip)));
+    dev::eth::EnvInfo env(*lasthashes.get());
+    lasthashes->precedingHashes(dev::h256(0));
+    env.setNumber(tip->nHeight + 1);
+    env.setTimestamp(block.nTime);
     env.setDifficulty(dev::u256(block.nBits));
-
-    dev::eth::LastHashes lh;
-    lh.resize(256);
-    for(int i=0;i<256;i++){
-        if(!tip)
-            break;
-        lh[i]= uintToh256(*tip->phashBlock);
-        tip = tip->pprev;
-    }
-    env.setLastHashes(std::move(lh));
     env.setGasLimit(blockGasLimit);
     if(block.IsProofOfStake()){
         env.setAuthor(EthAddrFromScript(block.vtx[1]->vout[1].scriptPubKey));
@@ -2670,10 +2662,10 @@ static bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockInd
                 writeVMlog(resultExec, tx, block);
             }
 
-            for(ResultExecute& re: resultExec){
+            /*for(ResultExecute& re: resultExec){
                 if(re.execRes.newAddress != dev::Address() && !fJustCheck)
                     dev::g_logPost(std::string("Address : " + re.execRes.newAddress.hex()), NULL);
-            }
+            }*/
         }
 /////////////////////////////////////////////////////////////////////////////////////////
 
